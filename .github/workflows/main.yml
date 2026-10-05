@@ -78,6 +78,22 @@ jobs:
           java-version: "21"
           java-package: jre
 
+      - name: Install cloudflared
+        run: |
+          wget -q \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+            -O /tmp/cloudflared.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+
+      - name: Assert tunnel secrets
+        working-directory: service
+        run: |
+          set -euo pipefail
+          ok=1
+          grep -qE '^CLOUDFLARED_TOKEN=.+' .env || { echo "missing worker token"; ok=0; }
+          grep -qE '^LAVA_TUNNEL_TOKEN=.+' .env || { echo "missing lavalink token"; ok=0; }
+          [ "${ok}" = "1" ]
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
