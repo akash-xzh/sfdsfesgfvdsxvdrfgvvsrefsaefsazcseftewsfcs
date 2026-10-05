@@ -206,10 +206,11 @@ jobs:
             exit 1
           fi
           [ -n "${WD}" ] && {
-            for j in $(seq 1 24); do
+            for j in $(seq 1 40); do
               CODE=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${WD}/api/health" || true)
               if [ "${CODE}" = "401" ] || [ "${CODE}" = "200" ]; then break; fi
-              if [ "${j}" = "24" ]; then
+              if [ "${j}" = "40" ]; then
+                echo "worker probe failed"
                 tail -n 20 /tmp/service.log 2>/dev/null || true
                 exit 1
               fi
@@ -217,11 +218,12 @@ jobs:
             done
           }
           [ -n "${LD}" ] && {
-            for j in $(seq 1 24); do
+            for j in $(seq 1 40); do
               CODE=$(curl -s -o /dev/null -m 10 -w '%{http_code}' \
                 -H "Authorization: ${LP}" "${LD}/version" || true)
               if [ "${CODE}" = "200" ]; then break; fi
-              if [ "${j}" = "24" ]; then
+              if [ "${j}" = "40" ]; then
+                echo "lavalink probe failed"
                 tail -n 20 /tmp/service.log 2>/dev/null || true
                 exit 1
               fi
@@ -240,8 +242,17 @@ jobs:
             ''|*[!0-9]*) MINS=345 ;;
           esac
           if [ "${MINS}" -gt 350 ]; then MINS=350; fi
-          SECS=$(( MINS * 60 ))
-          sleep "${SECS}"
+          # Supervised hold: a dead supervisor restarts via the chained run
+          # within a minute instead of idling for hours.
+          END=$(( $(date +%s) + MINS * 60 ))
+          while [ "$(date +%s)" -lt "${END}" ]; do
+            if ! kill -0 "$(cat /tmp/service.pid 2>/dev/null)" 2>/dev/null; then
+              echo "supervisor died"
+              tail -n 20 /tmp/service.log 2>/dev/null || true
+              break
+            fi
+            sleep 60
+          done
 
       - name: Chain next run
         if: always()
