@@ -133,49 +133,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
-      - name: Write worker environment
-        working-directory: service
-        env:
-          P_V1: ${{ secrets.SVC_API_KEY }}
-          P_V2: ${{ secrets.SVC_ADMIN_PW }}
-          P_V3: ${{ secrets.SVC_SIGNING_KEY }}
-          P_V5: ${{ secrets.SVC_STORE_EP }}
-          P_V6: ${{ secrets.SVC_STORE_AK }}
-          P_V7: ${{ secrets.SVC_STORE_SK }}
-          P_V8: ${{ secrets.SVC_STORE_BUCKET }}
-          P_V10: http://127.0.0.1:5500
-          P_V11: ${{ inputs.solver_proxy }}
-          P_V12: ${{ secrets.LAVA_PASSWORD }}
-          P_V13: ${{ secrets.WORKER_DOMAIN }}
-          P_V14: ${{ secrets.LAVA_DOMAIN }}
-          P_V15: ${{ secrets.CF_LAVA }}
-          P_V16: ${{ secrets.CF_WORKER }}
-        run: |
-          set -euo pipefail
-          umask 077
-          test -f ci/ci.env.template
-          sed \
-            -e "s|@@V1@@|${P_V1}|g" \
-            -e "s|@@V2@@|${P_V2}|g" \
-            -e "s|@@V3@@|${P_V3}|g" \
-            -e "s|@@V5@@|${P_V5}|g" \
-            -e "s|@@V6@@|${P_V6}|g" \
-            -e "s|@@V7@@|${P_V7}|g" \
-            -e "s|@@V8@@|${P_V8}|g" \
-            -e "s|@@V9@@|${GITHUB_WORKSPACE}/service/data|g" \
-            -e "s|@@V10@@|${P_V10}|g" \
-            -e "s|@@V11@@|${P_V11}|g" \
-            -e "s|@@V12@@|${P_V12}|g" \
-            -e "s|@@V13@@|${P_V13}|g" \
-            -e "s|@@V14@@|${P_V14}|g" \
-            -e "s|@@V15@@|${P_V15}|g" \
-            ci/ci.env.template > .env
-          # Worker tunnel token override only when provided; empty keeps the
-          # image default (an empty value would disable the tunnel entirely).
-          if [ -n "${P_V16}" ]; then
-            echo "CLOUDFLARED_TOKEN=${P_V16}" >> .env
-          fi
-
       - name: Write lavalink config
         working-directory: service/bundled-lavalink
         env:
@@ -187,24 +144,38 @@ jobs:
           sed -e "s|@@LAVA_YT_TOKEN@@|${P_LAVA_YT}|g" \
             application.template.yml > application.yml
 
-      - name: Assert tunnel secrets
-        working-directory: service
-        run: |
-          set -euo pipefail
-          ok=1
-          grep -qE '^CLOUDFLARED_TOKEN=.+' .env || { echo "missing worker token"; ok=0; }
-          grep -qE '^LAVA_TUNNEL_TOKEN=.+' .env || { echo "missing lavalink token"; ok=0; }
-          [ "${ok}" = "1" ]
-
       - name: Start worker and bundled solver
         working-directory: service
         env:
           HEADLESS: "1"
           SOLVER_BROWSER: ${{ inputs.solver_browser }}
+          PORT: "3000"
+          PYTHONUNBUFFERED: "1"
+          SUNO_DATA_DIR: ${{ github.workspace }}/service/data
+          SUNO_NO_DOWNLOAD: "1"
+          SUNO_API_KEY: ${{ secrets.SVC_API_KEY }}
+          DASH_PASSWORD: ${{ secrets.SVC_ADMIN_PW }}
+          SECRET_KEY: ${{ secrets.SVC_SIGNING_KEY }}
+          R2_ENDPOINT: ${{ secrets.SVC_STORE_EP }}
+          R2_ACCESS_KEY: ${{ secrets.SVC_STORE_AK }}
+          R2_SECRET_KEY: ${{ secrets.SVC_STORE_SK }}
+          R2_BUCKET: ${{ secrets.SVC_STORE_BUCKET }}
+          R2_PREFIX: suno-worker/data/
+          R2_ENABLED_FOR_WRITE: "true"
+          R2_ENABLED_FOR_WRITE: "true"
+          COOKIE_SECURE: "false"
+          SOLVER_BASE: http://127.0.0.1:5500
+          SOLVER_PROXY: ${{ inputs.solver_proxy }}
+          LAVALINK_PASSWORD: ${{ secrets.LAVA_PASSWORD }}
+          PUBLIC_DOMAIN: ${{ secrets.WORKER_DOMAIN }}
+          LAVA_DOMAIN: ${{ secrets.LAVA_DOMAIN }}
+          LAVA_TUNNEL_TOKEN: ${{ secrets.CF_LAVA }}
+          CLOUDFLARED_TOKEN: ${{ secrets.CF_WORKER }}
         run: |
           set -euo pipefail
+          [ -n "${CLOUDFLARED_TOKEN:-}" ] || { echo "missing worker token"; exit 1; }
+          [ -n "${LAVA_TUNNEL_TOKEN:-}" ] || { echo "missing lavalink token"; exit 1; }
           mkdir -p data
-          set -a && . ./.env && set +a
           chmod +x start.sh
           nohup ./start.sh >/tmp/service.log 2>&1 &
           echo $! >/tmp/service.pid
@@ -215,14 +186,16 @@ jobs:
           fi
 
       - name: Wait for fixed tunnel
+        env:
+          WD: ${{ secrets.WORKER_DOMAIN }}
+          LD: ${{ secrets.LAVA_DOMAIN }}
+          LP: ${{ secrets.LAVA_PASSWORD }}
+          LTT: ${{ secrets.CF_LAVA }}
         run: |
           set +e
-          WD=$(grep -E '^PUBLIC_DOMAIN=' service/.env 2>/dev/null | cut -d= -f2-)
-          LD=$(grep -E '^LAVA_DOMAIN=' service/.env 2>/dev/null | cut -d= -f2-)
-          LP=$(grep -E '^LAVALINK_PASSWORD=' service/.env 2>/dev/null | cut -d= -f2-)
           [ -z "${LP}" ] && LP="akash"
           WANT=1
-          if grep -qE '^LAVA_TUNNEL_TOKEN=.+' service/.env 2>/dev/null; then WANT=2; fi
+          [ -n "${LTT}" ] && WANT=2
           for i in $(seq 1 60); do
             N=$(grep -ciE 'Registered tunnel connection' /tmp/service.log 2>/dev/null || echo 0)
             if [ "${N}" -ge "${WANT}" ]; then break; fi
@@ -295,7 +268,7 @@ jobs:
 
       - name: Cleanup
         if: always()
-        working-directory: service
+        working-directory: service/bundled-lavalink
         run: |
           [ -f /tmp/service.pid ] && kill "$(cat /tmp/service.pid)" 2>/dev/null || true
-          rm -f .env
+          rm -f application.yml
