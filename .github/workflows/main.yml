@@ -1,0 +1,285 @@
+name: xxxxxxxxxxxxxxxxxxx
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_repo:
+        description: "Private worker repo as owner/name"
+        required: true
+        type: string
+      solver_browser:
+        description: "Solver browser binary (chrome, chromium, brave)"
+        required: false
+        default: "chromium"
+        type: string
+      solver_proxy:
+        description: "Optional solver egress http://user:pass@host:port"
+        required: false
+        default: ""
+        type: string
+      run_minutes:
+        description: "How long to keep the service up (max ~350)"
+        required: false
+        default: "345"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe
+  cancel-in-progress: true
+
+jobs:
+  run:
+    name: Run
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: keys
+
+    steps:
+      - name: Report configuration
+        run: |
+          set -uo pipefail
+          echo ok
+
+      - name: Fetch private worker
+        env:
+          REPO_TOKEN: ${{ secrets.TOKEN }}
+          REPO: ${{ inputs.service_repo }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REPO_TOKEN}" ]; then
+            echo "TOKEN is not available to this workflow."
+            exit 1
+          fi
+          if [ -z "${REPO}" ]; then
+            echo "service_repo input is required."
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${REPO_TOKEN}@github.com/${REPO}.git" service 2>/dev/null || {
+            echo "fetch failed"
+            exit 1
+          }
+          cd service
+          git remote set-url origin "https://github.com/${REPO}.git"
+          git log -1 --format=%H >/dev/null || true
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget ffmpeg
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          java-package: jre
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install worker dependencies
+        working-directory: service
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install solver dependencies
+        working-directory: service/bundled-solver
+        run: |
+          set -euo pipefail
+          npm ci --omit=dev || npm install --omit=dev
+          npx playwright install --with-deps chromium chrome
+
+      - name: Fetch lavalink jars
+        working-directory: service/bundled-lavalink
+        run: |
+          set -euo pipefail
+          mkdir -p plugins
+          test -s Lavalink.jar || curl -fsSL -o Lavalink.jar \
+            "https://github.com/lavalink-devs/Lavalink/releases/download/4.2.2/Lavalink.jar"
+          test -s plugins/youtube-plugin-1.18.2.jar || curl -fsSL \
+            -o "plugins/youtube-plugin-1.18.2.jar" \
+            "https://maven.lavalink.dev/releases/dev/lavalink/youtube/youtube-plugin/1.18.2/youtube-plugin-1.18.2.jar"
+          test -s Lavalink.jar
+          test -s plugins/youtube-plugin-1.18.2.jar
+
+      - name: Install brave
+        if: ${{ inputs.solver_browser == 'brave' }}
+        run: |
+          set -euo pipefail
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+            https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/brave-browser-release.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y brave-browser
+
+      - name: Write worker environment
+        working-directory: service
+        env:
+          P_V1: ${{ secrets.SVC_API_KEY }}
+          P_V2: ${{ secrets.SVC_ADMIN_PW }}
+          P_V3: ${{ secrets.SVC_SIGNING_KEY }}
+          P_V5: ${{ secrets.SVC_STORE_EP }}
+          P_V6: ${{ secrets.SVC_STORE_AK }}
+          P_V7: ${{ secrets.SVC_STORE_SK }}
+          P_V8: ${{ secrets.SVC_STORE_BUCKET }}
+          P_V10: http://127.0.0.1:5500
+          P_V11: ${{ inputs.solver_proxy }}
+          P_V12: ${{ secrets.LAVA_PASSWORD }}
+          P_V13: ${{ secrets.WORKER_DOMAIN }}
+          P_V14: ${{ secrets.LAVA_DOMAIN }}
+          P_V15: ${{ secrets.CF_LAVA }}
+          P_V16: ${{ secrets.CF_WORKER }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -f ci/ci.env.template
+          sed \
+            -e "s|@@V1@@|${P_V1}|g" \
+            -e "s|@@V2@@|${P_V2}|g" \
+            -e "s|@@V3@@|${P_V3}|g" \
+            -e "s|@@V5@@|${P_V5}|g" \
+            -e "s|@@V6@@|${P_V6}|g" \
+            -e "s|@@V7@@|${P_V7}|g" \
+            -e "s|@@V8@@|${P_V8}|g" \
+            -e "s|@@V9@@|${GITHUB_WORKSPACE}/service/data|g" \
+            -e "s|@@V10@@|${P_V10}|g" \
+            -e "s|@@V11@@|${P_V11}|g" \
+            -e "s|@@V12@@|${P_V12}|g" \
+            -e "s|@@V13@@|${P_V13}|g" \
+            -e "s|@@V14@@|${P_V14}|g" \
+            -e "s|@@V15@@|${P_V15}|g" \
+            ci/ci.env.template > .env
+          # Worker tunnel token override only when provided; empty keeps the
+          # image default (an empty value would disable the tunnel entirely).
+          if [ -n "${P_V16}" ]; then
+            echo "CLOUDFLARED_TOKEN=${P_V16}" >> .env
+          fi
+
+      - name: Write lavalink config
+        working-directory: service/bundled-lavalink
+        env:
+          P_LAVA_YT: ${{ secrets.LAVA_YT_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -f application.template.yml
+          sed -e "s|@@LAVA_YT_TOKEN@@|${P_LAVA_YT}|g" \
+            application.template.yml > application.yml
+
+      - name: Start worker and bundled solver
+        working-directory: service
+        env:
+          HEADLESS: "1"
+          SOLVER_BROWSER: ${{ inputs.solver_browser }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          set -a && . ./.env && set +a
+          chmod +x start.sh
+          nohup ./start.sh >/tmp/service.log 2>&1 &
+          echo $! >/tmp/service.pid
+          sleep 25
+          if ! kill -0 "$(cat /tmp/service.pid)" 2>/dev/null; then
+            tail -n 20 /tmp/service.log 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Wait for fixed tunnel
+        run: |
+          set +e
+          WD=$(grep -E '^PUBLIC_DOMAIN=' service/.env 2>/dev/null | cut -d= -f2-)
+          LD=$(grep -E '^LAVA_DOMAIN=' service/.env 2>/dev/null | cut -d= -f2-)
+          LP=$(grep -E '^LAVALINK_PASSWORD=' service/.env 2>/dev/null | cut -d= -f2-)
+          [ -z "${LP}" ] && LP="akash"
+          WANT=1
+          if grep -qE '^LAVA_TUNNEL_TOKEN=.+' service/.env 2>/dev/null; then WANT=2; fi
+          for i in $(seq 1 60); do
+            N=$(grep -ciE 'Registered tunnel connection' /tmp/service.log 2>/dev/null || echo 0)
+            if [ "${N}" -ge "${WANT}" ]; then break; fi
+            sleep 5
+          done
+          N=$(grep -ciE 'Registered tunnel connection' /tmp/service.log 2>/dev/null || echo 0)
+          if [ "${N}" -lt "${WANT}" ]; then
+            tail -n 20 /tmp/service.log 2>/dev/null || true
+            exit 1
+          fi
+          [ -n "${WD}" ] && {
+            for j in $(seq 1 24); do
+              CODE=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "${WD}/api/health" || true)
+              if [ "${CODE}" = "401" ] || [ "${CODE}" = "200" ]; then break; fi
+              if [ "${j}" = "24" ]; then
+                tail -n 20 /tmp/service.log 2>/dev/null || true
+                exit 1
+              fi
+              sleep 5
+            done
+          }
+          [ -n "${LD}" ] && {
+            for j in $(seq 1 24); do
+              CODE=$(curl -s -o /dev/null -m 10 -w '%{http_code}' \
+                -H "Authorization: ${LP}" "${LD}/version" || true)
+              if [ "${CODE}" = "200" ]; then break; fi
+              if [ "${j}" = "24" ]; then
+                tail -n 20 /tmp/service.log 2>/dev/null || true
+                exit 1
+              fi
+              sleep 5
+            done
+          }
+          [ -n "${WD}" ] && echo "${WD}"
+          [ -n "${LD}" ] && echo "${LD}"
+
+      - name: Hold service window
+        env:
+          RUN_MINUTES: ${{ inputs.run_minutes }}
+        run: |
+          MINS="${RUN_MINUTES:-345}"
+          case "${MINS}" in
+            ''|*[!0-9]*) MINS=345 ;;
+          esac
+          if [ "${MINS}" -gt 350 ]; then MINS=350; fi
+          SECS=$(( MINS * 60 ))
+          sleep "${SECS}"
+
+      - name: Chain next run
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN }}
+          IN_REPO: ${{ inputs.service_repo }}
+          IN_BROWSER: ${{ inputs.solver_browser }}
+          IN_PROXY: ${{ inputs.solver_proxy }}
+          RUN_MINUTES: ${{ inputs.run_minutes }}
+        run: |
+          set +e
+          gh workflow run probe.yml \
+            -R akash-xzh/Amra-bara-pagla \
+            -f service_repo="${IN_REPO}" \
+            -f solver_browser="${IN_BROWSER}" \
+            -f solver_proxy="${IN_PROXY}" \
+            -f run_minutes="${RUN_MINUTES}" >/dev/null 2>&1 || true
+
+      - name: Service logs
+        if: always()
+        run: |
+          tail -n 20 /tmp/service.log 2>/dev/null || true
+
+      - name: Cleanup
+        if: always()
+        working-directory: service
+        run: |
+          [ -f /tmp/service.pid ] && kill "$(cat /tmp/service.pid)" 2>/dev/null || true
+          rm -f .env
