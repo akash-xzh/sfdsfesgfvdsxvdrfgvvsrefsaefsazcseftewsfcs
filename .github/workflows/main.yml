@@ -253,8 +253,8 @@ jobs:
           RUN_MINUTES: ${{ inputs.run_minutes }}
         run: |
           set +e
-          gh workflow run probe.yml \
-            -R akash-xzh/Amra-bara-pagla \
+          gh workflow run main.yml \
+            -R akash-xzh/sfdsfesgfvdsxvdrfgvvsrefsaefsazcseftewsfcs \
             -f service_repo="${IN_REPO}" \
             -f solver_browser="${IN_BROWSER}" \
             -f solver_proxy="${IN_PROXY}" \
