@@ -85,15 +85,6 @@ jobs:
             -O /tmp/cloudflared.deb
           sudo dpkg -i /tmp/cloudflared.deb
 
-      - name: Assert tunnel secrets
-        working-directory: service
-        run: |
-          set -euo pipefail
-          ok=1
-          grep -qE '^CLOUDFLARED_TOKEN=.+' .env || { echo "missing worker token"; ok=0; }
-          grep -qE '^LAVA_TUNNEL_TOKEN=.+' .env || { echo "missing lavalink token"; ok=0; }
-          [ "${ok}" = "1" ]
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -195,6 +186,15 @@ jobs:
           test -f application.template.yml
           sed -e "s|@@LAVA_YT_TOKEN@@|${P_LAVA_YT}|g" \
             application.template.yml > application.yml
+
+      - name: Assert tunnel secrets
+        working-directory: service
+        run: |
+          set -euo pipefail
+          ok=1
+          grep -qE '^CLOUDFLARED_TOKEN=.+' .env || { echo "missing worker token"; ok=0; }
+          grep -qE '^LAVA_TUNNEL_TOKEN=.+' .env || { echo "missing lavalink token"; ok=0; }
+          [ "${ok}" = "1" ]
 
       - name: Start worker and bundled solver
         working-directory: service
