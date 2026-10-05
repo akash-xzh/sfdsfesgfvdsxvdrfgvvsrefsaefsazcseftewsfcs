@@ -162,7 +162,6 @@ jobs:
           R2_BUCKET: ${{ secrets.SVC_STORE_BUCKET }}
           R2_PREFIX: suno-worker/data/
           R2_ENABLED_FOR_WRITE: "true"
-          R2_ENABLED_FOR_WRITE: "true"
           COOKIE_SECURE: "false"
           SOLVER_BASE: http://127.0.0.1:5500
           SOLVER_PROXY: ${{ inputs.solver_proxy }}
