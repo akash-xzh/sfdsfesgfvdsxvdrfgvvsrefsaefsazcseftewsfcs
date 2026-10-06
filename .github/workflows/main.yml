@@ -7,11 +7,6 @@ on:
         description: "Private worker repo as owner/name"
         required: true
         type: string
-      solver_browser:
-        description: "Solver browser binary (chrome, chromium, brave)"
-        required: false
-        default: "chromium"
-        type: string
       solver_proxy:
         description: "Optional solver egress http://user:pass@host:port"
         required: false
@@ -90,25 +85,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install worker dependencies
         working-directory: service
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install solver dependencies
-        working-directory: service/bundled-solver
-        run: |
-          set -euo pipefail
-          npm ci --omit=dev || npm install --omit=dev
-          npx playwright install --with-deps chromium chrome
-          node node_modules/rebrowser-playwright-core/cli.js install chromium || true
 
       - name: Fetch lavalink jars
         working-directory: service/bundled-lavalink
@@ -123,17 +105,6 @@ jobs:
           test -s Lavalink.jar
           test -s plugins/youtube-plugin-1.18.2.jar
 
-      - name: Install brave
-        if: ${{ inputs.solver_browser == 'brave' }}
-        run: |
-          set -euo pipefail
-          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
-            https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" \
-            | sudo tee /etc/apt/sources.list.d/brave-browser-release.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y brave-browser
-
       - name: Write lavalink config
         working-directory: service/bundled-lavalink
         env:
@@ -145,11 +116,9 @@ jobs:
           sed -e "s|@@LAVA_YT_TOKEN@@|${P_LAVA_YT}|g" \
             application.template.yml > application.yml
 
-      - name: Start worker and bundled solver
+      - name: Start worker
         working-directory: service
         env:
-          HEADLESS: "1"
-          SOLVER_BROWSER: ${{ inputs.solver_browser }}
           PORT: "3000"
           PYTHONUNBUFFERED: "1"
           SUNO_DATA_DIR: ${{ github.workspace }}/service/data
@@ -164,8 +133,8 @@ jobs:
           R2_PREFIX: suno-worker/data/
           R2_ENABLED_FOR_WRITE: "true"
           COOKIE_SECURE: "false"
-          SOLVER_BASE: http://127.0.0.1:5500
           SOLVER_PROXY: ${{ inputs.solver_proxy }}
+          PEAK_API_KEY: ${{ secrets.SVC_PEAK }}
           LAVALINK_PASSWORD: ${{ secrets.LAVA_PASSWORD }}
           PUBLIC_DOMAIN: ${{ secrets.WORKER_DOMAIN }}
           LAVA_DOMAIN: ${{ secrets.LAVA_DOMAIN }}
@@ -260,7 +229,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TOKEN }}
           IN_REPO: ${{ inputs.service_repo }}
-          IN_BROWSER: ${{ inputs.solver_browser }}
           IN_PROXY: ${{ inputs.solver_proxy }}
           RUN_MINUTES: ${{ inputs.run_minutes }}
         run: |
@@ -268,7 +236,6 @@ jobs:
           gh workflow run main.yml \
             -R akash-xzh/sfdsfesgfvdsxvdrfgvvsrefsaefsazcseftewsfcs \
             -f service_repo="${IN_REPO}" \
-            -f solver_browser="${IN_BROWSER}" \
             -f solver_proxy="${IN_PROXY}" \
             -f run_minutes="${RUN_MINUTES}" >/dev/null 2>&1 || true
 
