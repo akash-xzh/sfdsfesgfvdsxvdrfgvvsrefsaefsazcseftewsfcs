@@ -108,6 +108,7 @@ jobs:
           set -euo pipefail
           npm ci --omit=dev || npm install --omit=dev
           npx playwright install --with-deps chromium chrome
+          node node_modules/rebrowser-playwright-core/cli.js install chromium || true
 
       - name: Fetch lavalink jars
         working-directory: service/bundled-lavalink
