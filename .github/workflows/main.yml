@@ -5,10 +5,11 @@ on:
     inputs:
       service_repo:
         description: "Private worker repo as owner/name"
-        required: true
+        required: false
+        default: "akash-xzh/Suno"
         type: string
       solver_proxy:
-        description: "Optional solver egress http://user:pass@host:port"
+        description: "Proxy override (empty = SVC_PROXY secret)"
         required: false
         default: ""
         type: string
@@ -133,7 +134,7 @@ jobs:
           R2_PREFIX: suno-worker/data/
           R2_ENABLED_FOR_WRITE: "true"
           COOKIE_SECURE: "false"
-          SOLVER_PROXY: ${{ inputs.solver_proxy }}
+          SOLVER_PROXY: ${{ inputs.solver_proxy == '' && secrets.SVC_PROXY || inputs.solver_proxy }}
           PEAK_API_KEY: ${{ secrets.SVC_PEAK }}
           LAVALINK_PASSWORD: ${{ secrets.LAVA_PASSWORD }}
           PUBLIC_DOMAIN: ${{ secrets.WORKER_DOMAIN }}
