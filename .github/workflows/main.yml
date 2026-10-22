@@ -64,8 +64,7 @@ jobs:
 
       - name: Install system packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget ffmpeg
+          command -v ffmpeg >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y wget ffmpeg) || true
 
       - name: Set up Java
         uses: actions/setup-java@v4
