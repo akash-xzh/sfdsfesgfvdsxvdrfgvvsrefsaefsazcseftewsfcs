@@ -65,7 +65,7 @@ jobs:
       - name: Install system packages
         run: |
           set -euo pipefail
-          echo "System packages check complete
+          echo "System packages check complete"
 
       - name: Set up Java
         uses: actions/setup-java@v4
