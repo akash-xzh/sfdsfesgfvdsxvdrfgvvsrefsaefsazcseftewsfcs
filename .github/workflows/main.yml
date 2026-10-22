@@ -93,6 +93,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install DuckBot dependencies
+        working-directory: service
+        run: |
+          set -euo pipefail
+          if [ -d "DB" ] && [ -f "DB/package.json" ]; then
+            cd DB
+            npm ci --omit=dev || npm install --omit=dev
+          fi
+
       - name: Fetch lavalink jars
         working-directory: service/bundled-lavalink
         run: |
@@ -141,12 +155,61 @@ jobs:
           LAVA_DOMAIN: ${{ secrets.LAVA_DOMAIN }}
           LAVA_TUNNEL_TOKEN: ${{ secrets.CF_LAVA }}
           CLOUDFLARED_TOKEN: ${{ secrets.CF_WORKER }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          BOT_SECRET: ${{ secrets.BOT_SECRET }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          MONGO_CONNECTION: ${{ secrets.MONGO_CONNECTION }}
+          SESSION_PASSWORD: ${{ secrets.SESSION_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          STRANGE_API_KEY: ${{ secrets.STRANGE_API_KEY }}
+          WEATHERSTACK_KEY: ${{ secrets.WEATHERSTACK_KEY }}
+          SUNO_BASE_URL: ${{ secrets.SUNO_BASE_URL }}
+          QUEST_USER_TOKEN: ${{ secrets.QUEST_USER_TOKEN }}
+          ACTIVITY_PUBLIC_URL: ${{ secrets.ACTIVITY_PUBLIC_URL }}
+          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+          TRUECALLER_COOKIE: ${{ secrets.TRUECALLER_COOKIE }}
+          ACTIVITY_PORT: "3002"
+          DASHBOARD_PORT: "3001" 
         run: |
           set -euo pipefail
           [ -n "${CLOUDFLARED_TOKEN:-}" ] || { echo "missing worker token"; exit 1; }
           [ -n "${LAVA_TUNNEL_TOKEN:-}" ] || { echo "missing lavalink token"; exit 1; }
           mkdir -p data
           chmod +x start.sh
+          if [ -d "DB" ]; then
+            cat > DB/.env << 'EOF'
+SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+STRANGE_API_KEY=${STRANGE_API_KEY}
+WEATHERSTACK_KEY=${WEATHERSTACK_KEY}
+SUNO_BASE_URL=${SUNO_BASE_URL}
+SUNO_API_KEY=${SUNO_API_KEY}
+BOT_SECRET=${BOT_SECRET}
+BOT_TOKEN=${BOT_TOKEN}
+GEMINI_API_KEY=${GEMINI_API_KEY}
+MONGO_CONNECTION=${MONGO_CONNECTION}
+SESSION_PASSWORD=${SESSION_PASSWORD}
+DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+QUEST_USER_TOKEN=${QUEST_USER_TOKEN}
+ACTIVITY_PUBLIC_URL=${ACTIVITY_PUBLIC_URL}
+CF_TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
+TRUECALLER_COOKIE=${TRUECALLER_COOKIE}
+ACTIVITY_PORT=3002
+DASHBOARD_PORT=3001
+EOF
+            python3 -c "
+import os
+with open('DB/.env', 'r', encoding='utf-8') as f:
+    template = f.read()
+expanded = os.path.expandvars(template)
+with open('DB/.env', 'w', encoding='utf-8') as f:
+    f.write(expanded)
+" || true
+          fi
           nohup ./start.sh >/tmp/service.log 2>&1 &
           echo $! >/tmp/service.pid
           sleep 25
