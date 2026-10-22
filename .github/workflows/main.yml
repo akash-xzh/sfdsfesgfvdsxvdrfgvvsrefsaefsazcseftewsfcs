@@ -172,7 +172,7 @@ jobs:
           CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
           TRUECALLER_COOKIE: ${{ secrets.TRUECALLER_COOKIE }}
           ACTIVITY_PORT: "3002"
-          DASHBOARD_PORT: "3001" 
+          DASHBOARD_PORT: "3001"
         run: |
           set -euo pipefail
           [ -n "${CLOUDFLARED_TOKEN:-}" ] || { echo "missing worker token"; exit 1; }
@@ -180,35 +180,7 @@ jobs:
           mkdir -p data
           chmod +x start.sh
           if [ -d "DB" ]; then
-            cat > DB/.env << 'EOF'
-SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
-STRANGE_API_KEY=${STRANGE_API_KEY}
-WEATHERSTACK_KEY=${WEATHERSTACK_KEY}
-SUNO_BASE_URL=${SUNO_BASE_URL}
-SUNO_API_KEY=${SUNO_API_KEY}
-BOT_SECRET=${BOT_SECRET}
-BOT_TOKEN=${BOT_TOKEN}
-GEMINI_API_KEY=${GEMINI_API_KEY}
-MONGO_CONNECTION=${MONGO_CONNECTION}
-SESSION_PASSWORD=${SESSION_PASSWORD}
-DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
-DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
-QUEST_USER_TOKEN=${QUEST_USER_TOKEN}
-ACTIVITY_PUBLIC_URL=${ACTIVITY_PUBLIC_URL}
-CF_TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}
-TRUECALLER_COOKIE=${TRUECALLER_COOKIE}
-ACTIVITY_PORT=3002
-DASHBOARD_PORT=3001
-EOF
-            python3 -c "
-import os
-with open('DB/.env', 'r', encoding='utf-8') as f:
-    template = f.read()
-expanded = os.path.expandvars(template)
-with open('DB/.env', 'w', encoding='utf-8') as f:
-    f.write(expanded)
-" || true
+            python3 -c "import os; keys = ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'STRANGE_API_KEY', 'WEATHERSTACK_KEY', 'SUNO_BASE_URL', 'SUNO_API_KEY', 'BOT_SECRET', 'BOT_TOKEN', 'GEMINI_API_KEY', 'MONGO_CONNECTION', 'SESSION_PASSWORD', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'QUEST_USER_TOKEN', 'ACTIVITY_PUBLIC_URL', 'CF_TUNNEL_TOKEN', 'TRUECALLER_COOKIE', 'ACTIVITY_PORT', 'DASHBOARD_PORT']; open('DB/.env', 'w').writelines([f'{k}={os.environ[k]}\n' for k in keys if k in os.environ])" || true
           fi
           nohup ./start.sh >/tmp/service.log 2>&1 &
           echo $! >/tmp/service.pid
